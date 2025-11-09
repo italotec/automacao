@@ -249,13 +249,12 @@ def verify():
     return "Forbidden", 403
 
 # ----------------------------------------------------------------------
-REPLY_BODY = """HOJE É O ÚLTIMO DIA PARA REGULARIZAR O SEU PACOTE
-Recebemos sua encomenda em nosso Centro Logístico.
-Para que possamos liberar o envio e garantir a entrega em até 3 dias úteis, é necessário regularizar a situação.
-O valor para a liberação é de R$ 57,15.
-Para dar continuidade, clique no botão abaixo:
-"REGULARIZAR"
-Assim que finalizar, por favor, me envie o comprovante. Estarei à disposição para ajudar."""
+REPLY_BODY = """Parabéns! 🎉
+Conforme nossos registros, seu CPF consta entre os contemplados da Viva Sorte! Esta é uma excelente oportunidade para realizar o resgate do prêmio.
+
+⚠ Ressaltamos que há um número limitado de confirmações disponíveis, e sua vaga será liberada se não houver retorno dentro das próximas horas.
+
+👉 Confirme e efetue o resgate pelo nosso portal"""
 
 @app.route("/webhook", methods=["POST"])
 def receive():
