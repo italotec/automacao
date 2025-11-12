@@ -85,19 +85,19 @@
   },
   "206": {
     "phone_number_id": "782486451624960",
-    "waba_id": "102290129340398",
+    "waba_id": "1155209749871395",
     "token": "EAAVGLZCCDa0IBP0ZBCKR7VZCzS5FImPdtDDfrPOEL3VkiQrLkZCaz5LmD0SorSvYNmglNtqvql0ZAu0lgaIZA3api5ksS0ZCjrJxZAFiO5IpgI6u4ErCA7ZCw69TVdcdCmt2z0ltu7MDrhA1YLsXDatWgmElb6yafwZBLUZBgBZAjAKseTKHvuibwnuGeqyFw5XPdxVHklsDHJ4vek4FdO7unUAxlVxi4CFKmh5ZAZCOKT",
     "templates": ["fernando"],
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
     "last_update": "17:00 12/11",
-    "ultimo_disparo": "16:45 12/11",
+    "ultimo_disparo": "10:43 12/11",
     "ban_info": null
   },
   "205": {
     "phone_number_id": "861294937068625",
-    "waba_id": "102290129340398",
+    "waba_id": "1821911275200304",
     "token": "EAAmEaKaILHYBP9ya1rGwD5P1yUg6qzjyGOV62ENtZAy7ClgwhaERxRi3ICq4YjA3HBPzJKflJcZBhBtTjw8EByK0icq0umQ6fhWKjnJZBEjVA3awo7xneP6kx0QNXbuamJGhmN7uUkmnGnDJeLNpsUO5BfJpY5g7WFcgZCCrJTPs5yJqR6EUZBbZAiq30q9Kw7o8g8EeBrqLS1ZAjknjJi0rUCp3KbxyyUIJrFF",
     "templates": ["larianee"],
     "status": "active",
@@ -109,7 +109,7 @@
   },
   "204": {
     "phone_number_id": "872299889295807",
-    "waba_id": "102290129340398",
+    "waba_id": "4199440307007632",
     "token": "EAAfCZCuH0ZBTEBPyMongoylxJTptQYZACZCqbTYZCaPy3L4AqT63yVdVIn7CH8tqapTf1ix9wZB3tozbx09HZCgc4sr6pPzr8SNGO6j7NuVUZAAZCacNZB2ZC1rLF5RwQptNoacpnUZBGknKyqZCZC7P0QqytjFEv36BzwCP1sG4ZA0ltxx8iD4dw33hSE5xXSZB367T1fZBVoDIjIJhHiNonHZCfFA5BZArQ8UjpYdHnQGBOBeIkNr",
     "templates": ["althis"],
     "status": "active",
