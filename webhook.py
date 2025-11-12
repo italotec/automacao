@@ -19,11 +19,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "dojunio")
-WHATSAPP_API = "https://graph.facebook.com/v23.0"
+WHATSAPP_API = "https://graph.facebook.com/v20.0"
 
 # Arquivos
 BMS_FILE = Path("bms.json")
-BANNER_PATH = Path("bannercorreios.jpg")
+BANNER_PATH = Path("banner.jpg")
 LINK_FILE = Path("linkcorreios.txt")
 RESPONDED_FILE = Path("respondidos.txt")
 MESSAGES_FILE = Path("messages.json")
@@ -43,6 +43,7 @@ def load_bms() -> Dict[str, Any]:
             cfg.setdefault("quality_rating", "GREEN")
             cfg.setdefault("messaging_limit", 2000)
             cfg.setdefault("last_update", "Nunca")
+            cfg.setdefault("ultimo_disparo", "Nunca")
             cfg.setdefault("ban_info", None)
             cfg.setdefault("templates", [])
         return data
@@ -333,6 +334,26 @@ def webhook():
     return jsonify({"status": "ok"}), 200
 
 # ----------------------------------------------------------------------
+# Atualizar Último Disparo
+@app.route("/update-disparo", methods=["POST"])
+def update_disparo():
+    global bms
+    data = request.get_json(silent=True) or {}
+    phone_number_id = data.get("phone_number_id")
+    time_str = data.get("time")
+    if not phone_number_id or not time_str:
+        return "Erro: phone_number_id e time obrigatórios", 400
+
+    for bm_id, cfg in bms.items():
+        if cfg.get("phone_number_id") == phone_number_id:
+            cfg["ultimo_disparo"] = time_str
+            save_bms(bms)
+            logger.info("Último disparo atualizado para BM %s: %s", bm_id, time_str)
+            return jsonify({"status": "ok"}), 200
+
+    return "BM não encontrada", 404
+
+# ----------------------------------------------------------------------
 # Adicionar BM
 @app.route("/add-bm", methods=["POST"])
 def add_bm():
@@ -355,7 +376,8 @@ def add_bm():
         "status": "active",
         "quality_rating": "GREEN",
         "messaging_limit": 2000,
-        "last_update": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
+        "last_update": "Nunca",
+        "ultimo_disparo": "Nunca",
         "ban_info": None,
         "templates": []
     }
@@ -375,48 +397,103 @@ HTML_PANEL = """
     <title>Painel de Status - WhatsApp BMs</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
-        body { background: #f4f6f9; color: #333; }
+        body { background: #f4f6f9; color: #333; line-height: 1.5; }
         .container { max-width: 1200px; margin: 16px auto; padding: 16px; }
-        h1 { text-align: center; margin-bottom: 20px; color: #075e54; }
-        .add-btn { display: block; margin: 0 auto 20px; padding: 12px 24px; background: #25d366; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        h1 { text-align: center; margin-bottom: 20px; color: #075e54; font-size: 1.5rem; }
+        
+        .add-btn {
+            display: block; margin: 0 auto 20px; padding: 12px 24px;
+            background: #25d366; color: white; border: none; border-radius: 8px;
+            font-weight: 600; cursor: pointer; font-size: 1rem;
+        }
         .add-btn:hover { background: #1da851; }
+
         .table-container { overflow-x: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white; }
         table { width: 100%; min-width: 800px; border-collapse: collapse; }
         th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
-        th { background: #075e54; color: white; position: sticky; top: 0; z-index: 10; }
-        .status { padding: 5px 10px; border-radius: 20px; font-weight: bold; font-size: 0.75rem; min-width: 70px; text-align: center; }
+        th { background: #075e54; color: white; position: sticky; top: 0; z-index: 10; font-size: 0.85rem; }
+        tr:hover { background: #f8f9fa; }
+
+        .status { 
+            padding: 5px 10px; 
+            border-radius: 20px; 
+            font-weight: bold; 
+            font-size: 0.75rem; 
+            display: inline-block;
+            min-width: 70px;
+            text-align: center;
+        }
         .active { background: #d4edda; color: #155724; }
         .restricted { background: #fff3cd; color: #856404; }
         .banned { background: #f8d7da; color: #721c24; }
         .flagged { background: #f1c40f; color: #7f5a00; }
-        .quality.green { color: #28a745; }
-        .quality.yellow { color: #ffc107; }
-        .quality.red { color: #dc3545; }
-        .ban-info { font-size: 0.75rem; }
+
+        .quality { font-size: 0.8rem; font-weight: 600; }
+        .green { color: #28a745; }
+        .yellow { color: #ffc107; }
+        .red { color: #dc3545; }
+
+        .ban-info { font-size: 0.75rem; color: #555; }
         .ban-info strong { color: #721c24; }
-        .refresh { text-align: center; margin-top: 20px; }
-        .refresh button { padding: 12px 24px; background: #075e54; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+
+        .refresh { 
+            text-align: center; 
+            margin-top: 20px; 
+        }
+        .refresh button { 
+            padding: 12px 24px; 
+            background: #075e54; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 1rem;
+            font-weight: 600;
+        }
         .refresh button:hover { background: #063f38; }
 
         /* Modal */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
         .modal-content { background: white; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-        .modal-header { display: flex; justify-content: space-between; margin-bottom: 16px; }
-        .modal-header h2 { color: #075e54; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .modal-header h2 { color: #075e54; font-size: 1.3rem; }
         .close { font-size: 1.5rem; cursor: pointer; color: #aaa; }
         .close:hover { color: #000; }
+
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; color: #333; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+        .form-group input:focus { outline: none; border-color: #25d366; }
+
         .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
         .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
         .btn-primary { background: #25d366; color: white; }
+        .btn-primary:hover { background: #1da851; }
         .btn-secondary { background: #ddd; color: #333; }
+        .btn-secondary:hover { background: #ccc; }
+
+        @media (max-width: 768px) {
+            .container { padding: 12px; margin: 8px auto; }
+            h1 { font-size: 1.3rem; margin-bottom: 16px; }
+            th, td { padding: 10px 8px; font-size: 0.8rem; }
+            .status { font-size: 0.7rem; padding: 4px 8px; min-width: 60px; }
+            .quality { font-size: 0.75rem; }
+            .ban-info { font-size: 0.7rem; }
+            .refresh button { padding: 10px 20px; font-size: 0.9rem; }
+        }
+
+        @media (max-width: 480px) {
+            h1 { font-size: 1.1rem; }
+            th, td { padding: 8px 6px; font-size: 0.75rem; }
+            .status { font-size: 0.65rem; padding: 3px 6px; }
+            .refresh button { width: 100%; max-width: 300px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Painel de Status dos BMs</h1>
+        <h1>Painel de Status dos BMs (WABA)</h1>
+        
         <button class="add-btn" onclick="openModal()">Adicionar BM</button>
 
         <div class="table-container">
@@ -429,6 +506,7 @@ HTML_PANEL = """
                         <th>Qualidade</th>
                         <th>Limite</th>
                         <th>Atualização</th>
+                        <th>Último Disparo</th>
                         <th>Ban</th>
                     </tr>
                 </thead>
@@ -437,11 +515,30 @@ HTML_PANEL = """
                     <tr>
                         <td><strong>{{ bm_id }}</strong></td>
                         <td>{{ cfg.phone_number_id }}</td>
-                        <td><span class="status {{ cfg.status }}">{{ {'active':'Ativo','restricted':'Restrito','banned':'Desativado','flagged':'Sinalizado'}.get(cfg.status,'Ativo') }}</span></td>
-                        <td class="quality {{ cfg.quality_rating.lower() }}">{{ cfg.quality_rating }}</td>
+                        <td>
+                            <span class="status {{ cfg.status }}">
+                                {{ {'active': 'Ativo', 'restricted': 'Restrito', 'banned': 'Desativado', 'flagged': 'Sinalizado'}.get(cfg.status, 'Ativo') }}
+                            </span>
+                        </td>
+                        <td class="quality {{ cfg.quality_rating.lower() if cfg.quality_rating != 'UNKNOWN' else '' }}">
+                            {{ cfg.quality_rating }}
+                        </td>
                         <td>{{ cfg.messaging_limit }}</td>
-                        <td style="white-space: nowrap;">{{ cfg.last_update }}</td>
-                        <td>{% if cfg.ban_info %}<div class="ban-info"><strong>{{ cfg.ban_info.reason }}</strong><br><small>{{ cfg.ban_info.date[:10] }}</small></div>{% else %}—{% endif %}</td>
+                        <td style="white-space: nowrap; font-size: 0.8rem;">
+                            {{ cfg.last_update }}
+                        </td>
+                        <td style="white-space: nowrap; font-size: 0.8rem;">
+                            {{ cfg.ultimo_disparo }}
+                        </td>
+                        <td>
+                            {% if cfg.ban_info %}
+                                <div class="ban-info">
+                                    <strong>{{ cfg.ban_info.reason }}</strong><br>
+                                    <small>{{ cfg.ban_info.date[:10] }}</small>
+                                </div>
+                            {% else %}—
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -489,7 +586,7 @@ HTML_PANEL = """
         const modal = document.getElementById('addModal');
         function openModal() { modal.style.display = 'flex'; }
         function closeModal() { modal.style.display = 'none'; }
-        window.onclick = e => { if (e.target === modal) closeModal(); }
+        window.onclick = function(e) { if (e.target === modal) closeModal(); }
     </script>
 </body>
 </html>
@@ -516,7 +613,7 @@ HTML_CHAT = """
         .main { flex: 1; display: flex; flex-direction: column; background: #e5ddd5; }
         .header { padding: 16px; background: #075e54; color: white; font-weight: bold; }
         .bm-list, .chat-list { padding: 8px; }
-        .bm-item, .chat-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; }
+        .bm-item, .chat-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; transition: background 0.2s; }
         .bm-item:hover, .chat-item:hover { background: #f5f5f5; }
         .bm-name { font-weight: 600; }
         .chat-name { font-weight: 500; flex: 1; }
