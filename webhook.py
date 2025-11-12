@@ -335,12 +335,12 @@ def webhook():
 
 # ----------------------------------------------------------------------
 # Atualizar Último Disparo
-@app.route("/update-disparo", methods=["POST"])
-def update_disparo():
+@app.route("/update-disparo", methods=["GET"])
+def update_disparo_get():
     global bms
-    data = request.get_json(silent=True) or {}
-    phone_number_id = data.get("phone_number_id")
-    time_str = data.get("time")
+    phone_number_id = request.args.get("phone_number_id")
+    time_str = request.args.get("time")
+
     if not phone_number_id or not time_str:
         return "Erro: phone_number_id e time obrigatórios", 400
 
