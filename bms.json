@@ -7,8 +7,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "14:22 12/11",
-    "ultimo_disparo": "09:15 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "178": {
@@ -19,8 +19,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "13:45 12/11",
-    "ultimo_disparo": "11:30 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "177": {
@@ -31,8 +31,8 @@
     "status": "restricted",
     "quality_rating": "YELLOW",
     "messaging_limit": 1000,
-    "last_update": "10:10 12/11",
-    "ultimo_disparo": "08:05 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "169": {
@@ -43,8 +43,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "15:55 12/11",
-    "ultimo_disparo": "14:40 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "156": {
@@ -55,8 +55,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "12:20 12/11",
-    "ultimo_disparo": "10:50 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "171": {
@@ -67,8 +67,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "16:30 12/11",
-    "ultimo_disparo": "15:10 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "183": {
@@ -79,8 +79,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "11:45 12/11",
-    "ultimo_disparo": "07:30 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "206": {
@@ -91,8 +91,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "17:00 12/11",
-    "ultimo_disparo": "10:43 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "205": {
@@ -103,8 +103,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "09:30 12/11",
-    "ultimo_disparo": "Nunca",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "204": {
@@ -115,8 +115,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "18:15 12/11",
-    "ultimo_disparo": "17:55 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "203": {
@@ -127,8 +127,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "13:00 12/11",
-    "ultimo_disparo": "12:20 12/11",
+    "last_update": "10:48 12/11",
+    "ultimo_disparo": "10:48 12/11",
     "ban_info": null
   },
   "197": {
@@ -139,8 +139,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "19:05 12/11",
-    "ultimo_disparo": "18:40 12/11",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   },
   "198": {
@@ -151,8 +151,8 @@
     "status": "active",
     "quality_rating": "GREEN",
     "messaging_limit": 2000,
-    "last_update": "20:30 12/11",
-    "ultimo_disparo": "Nunca",
+    "last_update": "",
+    "ultimo_disparo": "",
     "ban_info": null
   }
 }
